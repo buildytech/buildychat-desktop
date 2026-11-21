@@ -8,7 +8,7 @@ This repository is **only the Go backend and the build**. The frontend, the agen
 
 - The window loads the built `apps/chat-web` site, embedded in the binary (`frontend/dist`, made by `scripts/build-frontend.sh`).
 - The web app calls its runtime with `fetch("/runtime/v1/...")` as on the web. Here the Wails asset-server middleware answers those paths in Go, in process, on the app's own origin: no network port, no Basic auth, no CORS proxy.
-- Implemented so far (phase 1): `GET /runtime/healthz`, `GET /runtime/v1/status` (key state, model discovery, contract fingerprint, `capabilities`). Next: the provider forward for the agent loop in the webview (phase 2), Media with pictures kept on disk and WebP (phase 3), native ZIP save (phase 4).
+- Implemented so far: `GET /runtime/healthz`, `GET /runtime/v1/status` (key state, model discovery, contract fingerprint, `capabilities` with `loop: "client"`) and `POST /runtime/v1/xai/chat/completions`, the provider forward of the agent loop that runs in the webview (phase 2): the webview sends the placeholder key `host-held`, the forward sets the stored key, accepts only a chat model the key lists, caps the body at 256000 bytes, follows no redirect and redacts the key from the answer (`internal/runtime/forward.go`, contract `cases/xai-forward.json`). Next: Media with pictures kept on disk and WebP (phase 3), native ZIP save (phase 4).
 - The xAI key is kept in the OS keychain (`github.com/zalando/go-keyring`: macOS Keychain, Windows Credential Manager, Linux Secret Service). `XAI_API_KEY` in the environment is the development fallback. The key never reaches the webview and no answer contains it (checked by every contract case).
 
 ## Build

@@ -2,7 +2,8 @@ package runtime
 
 // The desktop runner of the runtime HTTP contract (buildytech/chat contract/runtime-http, ADR 0065): every case whose
 // surfaces include "desktop", from the embedded pinned submodule, through the same middleware the app uses, with the
-// provider stubbed from the case. Files of later phases are skipped by name until their handlers exist.
+// provider stubbed from the case (upstream replies expand the macros too). Files of later phases are skipped by name
+// until their handlers exist.
 
 import (
 	"bytes"
@@ -28,7 +29,7 @@ const (
 )
 
 // implemented lists the case files this phase serves; the rest are skipped with their phase.
-var implemented = map[string]bool{"status.json": true, "router.json": true}
+var implemented = map[string]bool{"status.json": true, "router.json": true, "xai-forward.json": true}
 
 type bytesSpec struct {
 	Hex     *string `json:"hex"`
@@ -262,14 +263,14 @@ func (s *stub) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 		var body []byte
 		if v, ok := decode(rep.JSON); ok {
-			body, _ = json.Marshal(v)
+			body, _ = json.Marshal(expand(v, s.m))
 			if h.Get("content-type") == "" {
 				h.Set("content-type", "application/json")
 			}
 		} else if rep.Bytes != nil {
 			body = bytesOf(s.contract, rep.Bytes)
 		} else if v, ok := decode(rep.Text); ok {
-			body = []byte(fmt.Sprint(v))
+			body = []byte(fmt.Sprint(expand(v, s.m)))
 		}
 		return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Request: r}, nil
 	}

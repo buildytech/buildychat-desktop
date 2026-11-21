@@ -28,6 +28,7 @@ type Server struct {
 	base         string
 	httpClient   *http.Client
 	capabilities Capabilities
+	models       modelCache
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -39,8 +40,8 @@ type Options struct {
 	Capabilities *Capabilities
 }
 
-// DesktopCapabilities is what this build implements: the agent turn runs in the webview (phase 2 adds the provider
-// forward); local picture files and the native save come with phases 3 and 4.
+// DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
+// (forward.go); local picture files and the native save come with phases 3 and 4.
 var DesktopCapabilities = Capabilities{Loop: "client", Files: false, SaveFile: false}
 
 // New builds the runtime.
@@ -59,11 +60,14 @@ func (s *Server) baseURL() string {
 	return s.constants.XAI.DefaultBaseURL
 }
 
+// client never follows a redirect, whichever client was configured: the key must not travel to another host.
 func (s *Server) client() *http.Client {
+	c := http.Client{}
 	if s.httpClient != nil {
-		return s.httpClient
+		c = *s.httpClient
 	}
-	return &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &c
 }
 
 // stripRuntimePrefix mirrors packages/chat-agent/src/protect.ts.
@@ -123,6 +127,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusOK
 		}
 		writeJSON(w, status, doc)
+	case strings.HasPrefix(path, forwardPrefix):
+		s.forward(w, r, path, method)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]string{"code": "not_found", "message": "Unknown runtime path."}})
 	}
