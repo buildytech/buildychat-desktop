@@ -11,6 +11,21 @@ import (
 
 const fallback = "200.html"
 
+// types fixes the MIME types of the site's files: Go reads them from the OS (the Windows registry maps .mjs to
+// text/plain, and a module script with that type is refused by the webview).
+var types = map[string]string{
+	".js":    "text/javascript; charset=utf-8",
+	".mjs":   "text/javascript; charset=utf-8",
+	".css":   "text/css; charset=utf-8",
+	".json":  "application/json",
+	".svg":   "image/svg+xml",
+	".wasm":  "application/wasm",
+	".html":  "text/html; charset=utf-8",
+	".png":   "image/png",
+	".webp":  "image/webp",
+	".woff2": "font/woff2",
+}
+
 // Handler serves site; when site has no 200.html it answers a short page that says how to build the frontend.
 func Handler(site fs.FS) http.Handler {
 	files := http.FileServerFS(site)
@@ -18,6 +33,9 @@ func Handler(site fs.FS) http.Handler {
 		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		if name != "" && name != fallback {
 			if info, err := fs.Stat(site, name); err == nil && !info.IsDir() {
+				if typ, ok := types[strings.ToLower(path.Ext(name))]; ok {
+					w.Header().Set("content-type", typ)
+				}
 				if strings.HasPrefix(name, "_app/immutable/") {
 					w.Header().Set("cache-control", "public, max-age=31536000, immutable")
 				}
