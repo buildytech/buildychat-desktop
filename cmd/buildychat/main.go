@@ -1,0 +1,73 @@
+// BuildY Chat desktop: the buildytech/chat web app in a Wails 3 window, with its runtime (/runtime/v1/*) answered in
+// process by Go. Build tags: none for the desktop app, `server` for the headless HTTP mode (tests, the exam runner).
+//
+//	buildychat              open the app
+//	buildychat --set-key    read the xAI key from stdin and keep it in the OS keychain (never pass it in argv)
+//	buildychat --forget-key remove it from the keychain
+package main
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+
+	buildychat "github.com/buildytech/buildychat-desktop"
+	"github.com/buildytech/buildychat-desktop/internal/runtime"
+	"github.com/buildytech/buildychat-desktop/internal/secrets"
+	"github.com/buildytech/buildychat-desktop/internal/webapp"
+)
+
+func main() {
+	setKey := flag.Bool("set-key", false, "read the xAI API key from stdin and store it in the OS keychain")
+	forgetKey := flag.Bool("forget-key", false, "remove the xAI API key from the OS keychain")
+	flag.Parse()
+	switch {
+	case *setKey:
+		fmt.Fprintln(os.Stderr, "Paste the xAI API key and press Enter:")
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && line == "" {
+			log.Fatal("no key read from stdin")
+		}
+		if err := secrets.Store(line); err != nil {
+			log.Fatalf("keychain: %v", err)
+		}
+		fmt.Fprintln(os.Stderr, "Stored in the OS keychain.")
+		return
+	case *forgetKey:
+		if err := secrets.Forget(); err != nil {
+			log.Fatalf("keychain: %v", err)
+		}
+		fmt.Fprintln(os.Stderr, "Removed from the OS keychain.")
+		return
+	}
+
+	constants, err := runtime.LoadConstants(buildychat.Contract())
+	if err != nil {
+		log.Fatal(err)
+	}
+	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL")})
+
+	app := application.New(application.Options{
+		Name:        "BuildY Chat",
+		Description: "BuildY Chat desktop (buildytech/chat in a Wails window)",
+		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
+		Server:      serverOptions(),
+		Assets: application.AssetOptions{
+			Handler:    webapp.Handler(buildychat.Frontend()),
+			Middleware: rt.Middleware,
+		},
+	})
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:  "BuildY Chat",
+		Width:  1440,
+		Height: 900,
+		URL:    "/",
+	})
+	if err := app.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
