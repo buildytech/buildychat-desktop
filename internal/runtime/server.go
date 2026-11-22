@@ -6,6 +6,7 @@ package runtime
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/buildytech/buildychat-desktop/internal/media"
@@ -32,6 +33,8 @@ type Server struct {
 	capabilities Capabilities
 	models       modelCache
 	mediaDir     string
+	saver        Saver
+	exportName   *regexp.Regexp
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -43,15 +46,19 @@ type Options struct {
 	Capabilities *Capabilities
 	// MediaDir is the picture store (capabilities.files); default <UserConfigDir>/BuildY/media.
 	MediaDir string
+	// Saver keeps the ZIP export (capabilities.saveFile); nil: no native save, the browser downloads it.
+	Saver Saver
 }
 
 // DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
-// (forward.go); Media results are kept in a local picture store (media.go); the native save comes with phase 4.
-var DesktopCapabilities = Capabilities{Loop: "client", Files: true, SaveFile: false}
+// (forward.go); Media results are kept in a local picture store (media.go); the ZIP export is saved natively when a
+// Saver is configured (export.go; SaveFile follows Options.Saver).
+var DesktopCapabilities = Capabilities{Loop: "client", Files: true, SaveFile: true}
 
 // New builds the runtime.
 func New(o Options) *Server {
-	s := &Server{constants: o.Constants, keys: o.Keys, base: strings.TrimRight(strings.TrimSpace(o.BaseURL), "/"), httpClient: o.Client, capabilities: DesktopCapabilities, mediaDir: o.MediaDir}
+	s := &Server{constants: o.Constants, keys: o.Keys, base: strings.TrimRight(strings.TrimSpace(o.BaseURL), "/"), httpClient: o.Client, capabilities: DesktopCapabilities, mediaDir: o.MediaDir, saver: o.Saver, exportName: compileExportName(o.Constants.Export.Name)}
+	s.capabilities.SaveFile = o.Saver != nil
 	if s.mediaDir == "" {
 		s.mediaDir = media.DefaultDir()
 	}
@@ -137,6 +144,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, doc)
 	case method == http.MethodPost && (path == mediaPath || strings.HasPrefix(path, mediaPath+"/")):
 		s.media(w, r)
+	case path == exportPath:
+		s.export(w, r, method)
 	case strings.HasPrefix(path, filesPrefix):
 		s.files(w, r, path, method)
 	case strings.HasPrefix(path, forwardPrefix):

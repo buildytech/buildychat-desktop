@@ -40,6 +40,11 @@ type Constants struct {
 			Cool     [2]float64 `json:"cool"`
 		} `json:"filterLimits"`
 	} `json:"encode"`
+	Export struct {
+		MaxBytes     int64  `json:"maxBytes"`
+		Name         string `json:"name"`
+		FallbackName string `json:"fallbackName"`
+	} `json:"export"`
 }
 
 // LoadConstants reads constants.json from the embedded contract.
@@ -55,7 +60,8 @@ func LoadConstants(contract fs.FS) (Constants, error) {
 	if c.Runtime == "" || c.Contract == "" || c.CandidateChatModel == "" || c.XAI.DefaultBaseURL == "" || len(c.XAI.Discovery) != 3 ||
 		c.Images.Model == "" || len(c.Images.Aspects) == 0 || c.Images.MaxCandidates < 1 || c.Images.MaxPrompt < 1 ||
 		len(c.Asset.Hosts) == 0 || len(c.Asset.Types) == 0 || c.Asset.MaxBytes < 1 ||
-		len(c.Encode.Types) == 0 || len(c.Encode.Tiers) == 0 || c.Encode.MaxBytes < 1 || c.Encode.MaxURLBytes < 1 {
+		len(c.Encode.Types) == 0 || len(c.Encode.Tiers) == 0 || c.Encode.MaxBytes < 1 || c.Encode.MaxURLBytes < 1 ||
+		c.Export.MaxBytes < 1 || c.Export.Name == "" || c.Export.FallbackName == "" {
 		return c, fmt.Errorf("contract constants: incomplete constants.json")
 	}
 	return c, nil

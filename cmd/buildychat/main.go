@@ -4,6 +4,8 @@
 //	buildychat              open the app
 //	buildychat --set-key    read the xAI key from stdin and keep it in the OS keychain (never pass it in argv)
 //	buildychat --forget-key remove it from the keychain
+//
+// The ZIP export is saved through the system's save dialog; the `server` build writes it to BUILDYCHAT_EXPORT_DIR.
 package main
 
 import (
@@ -49,9 +51,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL")})
+	var app *application.App
+	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app })})
 
-	app := application.New(application.Options{
+	app = application.New(application.Options{
 		Name:        "BuildY Chat",
 		Description: "BuildY Chat desktop (buildytech/chat in a Wails window)",
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},

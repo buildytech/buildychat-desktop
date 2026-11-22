@@ -7,6 +7,7 @@ package runtime
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,7 +17,10 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -33,7 +37,7 @@ const (
 
 // implemented lists the case files this phase serves; the rest are skipped with their phase.
 var implemented = map[string]bool{"status.json": true, "router.json": true, "xai-forward.json": true,
-	"media-generate.json": true, "media-asset.json": true, "media-encode.json": true, "media-files.json": true}
+	"media-generate.json": true, "media-asset.json": true, "media-encode.json": true, "media-files.json": true, "export.json": true}
 
 type bytesSpec struct {
 	Hex     *string `json:"hex"`
@@ -65,8 +69,10 @@ type contractCase struct {
 	Name     string   `json:"name"`
 	Surfaces []string `json:"surfaces"`
 	Env      struct {
-		Key bool `json:"key"`
+		Key  bool   `json:"key"`
+		Save string `json:"save"`
 	} `json:"env"`
+	Exports []string `json:"exports"`
 	Request struct {
 		Method  string            `json:"method"`
 		Path    string            `json:"path"`
@@ -84,6 +90,7 @@ type contractCase struct {
 		Headers     map[string]string `json:"headers"`
 		Bytes       *bytesSpec        `json:"bytes"`
 		NotContains []string          `json:"notContains"`
+		Saved       json.RawMessage   `json:"saved"`
 	} `json:"expect"`
 }
 
@@ -340,7 +347,20 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 			t.Fatal(err)
 		}
 	}
-	srv := New(Options{Constants: constants, Keys: key, BaseURL: testBase, Client: &http.Client{Transport: st}, MediaDir: dir})
+	exports := t.TempDir()
+	for _, name := range c.Exports {
+		if err := os.WriteFile(filepath.Join(exports, name), []byte("an earlier export"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var saver Saver = DirSaver{Dir: exports}
+	switch c.Env.Save {
+	case "cancel":
+		saver = SaverFunc(func(context.Context, string, []byte) (string, error) { return "", ErrCancelled })
+	case "none":
+		saver = nil
+	}
+	srv := New(Options{Constants: constants, Keys: key, BaseURL: testBase, Client: &http.Client{Transport: st}, MediaDir: dir, Saver: saver})
 	static := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "web app", http.StatusTeapot) })
 	handler := srv.Middleware(static)
 
@@ -391,6 +411,9 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 	if c.Expect.Bytes != nil && !bytes.Equal(raw, bytesOf(contract, c.Expect.Bytes)) {
 		problems = append(problems, "body bytes differ")
 	}
+	if len(c.Expect.Saved) > 0 {
+		problems = append(problems, checkSaved(contract, exports, c.Exports, c.Expect.Saved)...)
+	}
 	if c.Expect.Status == http.StatusNoContent && len(raw) > 0 {
 		problems = append(problems, "204 with a body")
 	}
@@ -409,6 +432,40 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 		}
 	}
 	return problems
+}
+
+// checkSaved compares the export folder with expect.saved: null (nothing new written) or {name, bytes}.
+func checkSaved(contract fs.FS, dir string, before []string, want json.RawMessage) []string {
+	entries, _ := os.ReadDir(dir)
+	var written []string
+	for _, e := range entries {
+		if !slices.Contains(before, e.Name()) {
+			written = append(written, e.Name())
+		}
+	}
+	if string(want) == "null" {
+		if len(written) > 0 {
+			return []string{fmt.Sprintf("saved: expected nothing written, got %v", written)}
+		}
+		return nil
+	}
+	var spec struct {
+		Name  string     `json:"name"`
+		Bytes *bytesSpec `json:"bytes"`
+	}
+	if err := json.Unmarshal(want, &spec); err != nil {
+		return []string{"saved: " + err.Error()}
+	}
+	if len(written) != 1 || written[0] != spec.Name {
+		return []string{fmt.Sprintf("saved: expected %s written, got %v", spec.Name, written)}
+	}
+	if spec.Bytes != nil {
+		got, _ := os.ReadFile(filepath.Join(dir, spec.Name))
+		if !bytes.Equal(got, bytesOf(contract, spec.Bytes)) {
+			return []string{"saved: the file's bytes differ"}
+		}
+	}
+	return nil
 }
 
 func desktop(c contractCase) bool {
@@ -463,7 +520,7 @@ func TestRuntimeHTTPContract(t *testing.T) {
 		}
 	}
 	t.Logf("desktop contract cases run: %d", ran)
-	if ran < 60 {
+	if ran < 90 {
 		t.Fatalf("only %d desktop cases ran", ran)
 	}
 }
