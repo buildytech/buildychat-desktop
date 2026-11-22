@@ -14,3 +14,8 @@ const (
 	// Company is the publisher shown by installers.
 	Company = "BuildY"
 )
+
+// Version is the app version the build was stamped with: CI and scripts/package.sh set it with
+// -ldflags "-X github.com/buildytech/buildychat-desktop/internal/appid.Version=<version>". An unstamped build is "dev"
+// (the contract's constants.host.devVersion); GET /runtime/v1/status reports it as host.version.
+var Version = "dev"

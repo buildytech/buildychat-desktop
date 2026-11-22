@@ -45,6 +45,11 @@ type Constants struct {
 		Name         string `json:"name"`
 		FallbackName string `json:"fallbackName"`
 	} `json:"export"`
+	Host struct {
+		Kind       string `json:"kind"`
+		DevVersion string `json:"devVersion"`
+		Version    string `json:"version"`
+	} `json:"host"`
 }
 
 // LoadConstants reads constants.json from the embedded contract.
@@ -61,7 +66,8 @@ func LoadConstants(contract fs.FS) (Constants, error) {
 		c.Images.Model == "" || len(c.Images.Aspects) == 0 || c.Images.MaxCandidates < 1 || c.Images.MaxPrompt < 1 ||
 		len(c.Asset.Hosts) == 0 || len(c.Asset.Types) == 0 || c.Asset.MaxBytes < 1 ||
 		len(c.Encode.Types) == 0 || len(c.Encode.Tiers) == 0 || c.Encode.MaxBytes < 1 || c.Encode.MaxURLBytes < 1 ||
-		c.Export.MaxBytes < 1 || c.Export.Name == "" || c.Export.FallbackName == "" {
+		c.Export.MaxBytes < 1 || c.Export.Name == "" || c.Export.FallbackName == "" ||
+		c.Host.Kind == "" || c.Host.DevVersion == "" || c.Host.Version == "" {
 		return c, fmt.Errorf("contract constants: incomplete constants.json")
 	}
 	return c, nil

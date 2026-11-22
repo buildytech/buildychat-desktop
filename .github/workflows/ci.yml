@@ -15,6 +15,8 @@ jobs:
     env:
       # The WebP encoder is gen2brain/webp's embedded libwebp, never a system one (scripts/gate.sh).
       TAGS: nodynamic
+      # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version, status host.version).
+      BUILDYCHAT_VERSION: 0.1.0
     defaults:
       run:
         shell: bash
@@ -38,9 +40,9 @@ jobs:
       - name: Tests (unit, runtime HTTP contract on the desktop surface, WebP goldens)
         run: go test -tags "$TAGS" -count=1 -v ./ ./internal/...
       - name: Headless build (server tag)
-        run: go build -tags "server $TAGS" -o bin/buildychat-server ./cmd/buildychat
+        run: go build -tags "server $TAGS" -ldflags "-X github.com/buildytech/buildychat-desktop/internal/appid.Version=$BUILDYCHAT_VERSION" -o bin/buildychat-server ./cmd/buildychat
       - name: Desktop build
-        run: go build -tags "$TAGS" -o bin/buildychat ./cmd/buildychat
+        run: go build -tags "$TAGS" -ldflags "-X github.com/buildytech/buildychat-desktop/internal/appid.Version=$BUILDYCHAT_VERSION" -o bin/buildychat ./cmd/buildychat
       - uses: actions/upload-artifact@v4
         with:
           name: buildychat-${{ matrix.os }}

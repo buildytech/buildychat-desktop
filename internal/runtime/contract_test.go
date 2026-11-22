@@ -197,12 +197,20 @@ func bytesOf(contract fs.FS, s *bytesSpec) []byte {
 }
 
 // matches is the subset matcher of the TS runner: objects by expected keys, arrays by length and element,
-// "$absent", "$boolean", "$prefix:<text>".
+// "$absent", "$boolean", "$prefix:<text>", "$match:<regex>".
 func matches(actual any, expected any, path string, problems *[]string) {
 	if s, ok := expected.(string); ok {
 		if s == "$boolean" {
 			if _, ok := actual.(bool); !ok {
 				*problems = append(*problems, fmt.Sprintf("%s: expected a boolean, got %v", path, actual))
+			}
+			return
+		}
+		if strings.HasPrefix(s, "$match:") {
+			a, ok := actual.(string)
+			re, err := regexp.Compile(s[7:])
+			if err != nil || !ok || !re.MatchString(a) {
+				*problems = append(*problems, fmt.Sprintf("%s: expected %s, got %v", path, s, actual))
 			}
 			return
 		}

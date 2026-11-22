@@ -12,7 +12,8 @@ WAILS3="${WAILS3:-wails3}"
 VERSION="${BUILDYCHAT_VERSION:-0.1.0}"
 export BUILDYCHAT_VERSION="$VERSION"
 TAGS="nodynamic production"
-LDFLAGS="-s -w"
+# The status host.version of the build (internal/appid.Version; unstamped builds report "dev").
+LDFLAGS="-s -w -X github.com/buildytech/buildychat-desktop/internal/appid.Version=$VERSION"
 [ -f frontend/dist/200.html ] || { echo "package: frontend/dist missing (scripts/build-frontend.sh)" >&2; exit 1; }
 rm -rf bin dist && mkdir -p bin dist
 case "$(uname -s)" in

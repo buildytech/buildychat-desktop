@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/buildytech/buildychat-desktop/internal/media"
@@ -24,6 +25,15 @@ type Capabilities struct {
 	SaveFile bool   `json:"saveFile"`
 }
 
+// Host is the optional `host` of /v1/status (contract/runtime-http/host.schema.json): the desktop host names itself,
+// its version and platform; the web hosts send none, which is how the app tells it runs in a browser.
+type Host struct {
+	Kind    string `json:"kind"`
+	Version string `json:"version"`
+	OS      string `json:"os"`
+	Arch    string `json:"arch"`
+}
+
 // Server is the runtime of one desktop app.
 type Server struct {
 	constants    Constants
@@ -35,6 +45,7 @@ type Server struct {
 	mediaDir     string
 	saver        Saver
 	exportName   *regexp.Regexp
+	host         Host
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -48,6 +59,9 @@ type Options struct {
 	MediaDir string
 	// Saver keeps the ZIP export (capabilities.saveFile); nil: no native save, the browser downloads it.
 	Saver Saver
+	// Version is the stamped app version (appid.Version); one that does not match constants.host.version, or none,
+	// is reported as constants.host.devVersion.
+	Version string
 }
 
 // DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
@@ -65,7 +79,18 @@ func New(o Options) *Server {
 	if o.Capabilities != nil {
 		s.capabilities = *o.Capabilities
 	}
+	s.host = hostOf(o.Constants, o.Version)
 	return s
+}
+
+// hostOf is the status host of this build: the contract's kind, the stamped version when it has the contract's shape
+// (else the dev version), and the platform Go was built for.
+func hostOf(c Constants, version string) Host {
+	h := Host{Kind: c.Host.Kind, Version: c.Host.DevVersion, OS: goruntime.GOOS, Arch: goruntime.GOARCH}
+	if re, err := regexp.Compile(c.Host.Version); err == nil && version != "" && re.MatchString(version) {
+		h.Version = version
+	}
+	return h
 }
 
 func (s *Server) baseURL() string {

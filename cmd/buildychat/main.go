@@ -54,7 +54,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var app *application.App
-	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app })})
+	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app }), Version: appid.Version})
 
 	app = application.New(application.Options{
 		Name:        appid.Name,

@@ -2,7 +2,8 @@ package runtime
 
 import "context"
 
-// StatusDoc is GET /v1/status: the fields of apps/xai-runtime/src/status.ts the web app reads, plus `capabilities`.
+// StatusDoc is GET /v1/status: the fields of apps/xai-runtime/src/status.ts the web app reads, plus `capabilities` and
+// `host`.
 type StatusDoc struct {
 	Runtime          string       `json:"runtime"`
 	Ready            bool         `json:"ready"`
@@ -14,6 +15,7 @@ type StatusDoc struct {
 	PublicSecretLeak []string     `json:"publicSecretLeak"`
 	Contract         string       `json:"contract"`
 	Capabilities     Capabilities `json:"capabilities"`
+	Host             Host         `json:"host"`
 }
 
 type KeyState struct {
@@ -48,6 +50,7 @@ func (s *Server) status(ctx context.Context) StatusDoc {
 		PublicSecretLeak: []string{},
 		Contract:         s.constants.Contract,
 		Capabilities:     s.capabilities,
+		Host:             s.host,
 	}
 	discoverCode := "xai_api_key_missing"
 	if present {
