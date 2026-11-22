@@ -55,3 +55,45 @@ git add third_party/chat && git commit -m "chat: pin <commit>"
 Pushes go to `main` only, after `scripts/gate.sh`; no force pushes, no skipped hooks. No UI code lives here: UI changes are made in `buildytech/chat` under its UI8Kit / ui8px rules. Generated files (`frontend/dist`) are never committed.
 
 License: Apache-2.0, as buildytech/chat.
+
+## Installers (unsigned, Phase 5)
+
+CI builds installers for the same three systems after the tests (`scripts/package.sh`, Wails **3.1.0** packaging tools),
+and uploads workflow artifacts only. No GitHub Releases, no signing secrets. Installer artifacts (14-day retention):
+
+| Artifact | Contents | Architecture / minimum |
+|---|---|---|
+| `buildychat-installer-windows-2025` | `buildychat-amd64-installer.exe` (NSIS; WebView2 bootstrapper if needed), bare `.exe` ZIP | Windows 10+ x64 |
+| `buildychat-installer-macos-15` | `BuildY Chat.dmg`, `.app.zip` | CI runner's native CPU (currently arm64); macOS 12+ |
+| `buildychat-installer-ubuntu-24.04` | `buildychat_0.1.0_amd64.deb`, AppImage when linuxdeploy succeeds | Linux x64; DEB needs GTK 4 + WebKitGTK 6 (Ubuntu 24.04+ / Debian 13+) |
+
+The raw-binary artifacts stay available too. To reproduce: install the pinned wails3 CLI with `go install
+ github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0`, build the frontend, then `bash scripts/package.sh` on the target OS.
+`BUILDYCHAT_VERSION` changes the package version (default `0.1.0`); it never changes the app identity. Linux's .deb is
+required; AppImage is best effort because linuxdeploy's GTK/WebKit dependency bundling can vary between runners.
+Install/uninstall and GUI launch on a real user desktop still need manual smoke testing. The headless five-page exam
+validates the app/runtime, not installer behaviour.
+
+**Fixed identity:** `tw.buildy.chat` (macOS bundle id, Windows WebView2 data folder `<UserConfigDir>/tw.buildy.chat/WebView2`),
+product `BuildY Chat`, executable `buildychat`. `internal/appid` and its test keep the packaging files aligned. Keep this
+identity across upgrades to preserve sessions. Pre-installer development Windows builds used Wails' binary-name default;
+export/import their sessions before moving to the fixed-id build. Sessions remain in the WebView's local storage;
+user-selected ZIPs, keychain keys and media are not removed by installer uninstall. The generated Wails icon is temporary.
+
+### Signing and notarization (not configured)
+
+- **Windows:** an organisation-validated code-signing certificate (preferably hardware/cloud backed; EV or a trusted
+  signing service), signing-tool access, SHA-256 Authenticode and a timestamp server. Sign the .exe **before** NSIS, then
+  sign the installer; verify both. Until then SmartScreen shows an unknown publisher warning. No certificate/private key
+  or provider credential should be committed.
+- **macOS:** Apple Developer Program team, Developer ID Application certificate/private key in an ephemeral CI keychain,
+  hardened runtime/entitlements appropriate for WebKit, secure timestamp; sign the app and DMG, submit to Apple's notary
+  service (App Store Connect API key or a keychain notary profile), then staple and verify with `codesign` / `spctl`.
+  Current builds have only an **ad-hoc** signature (`--sign -`), no Developer ID and no notarization. Gatekeeper may block
+  a quarantined download. Do not disable Gatekeeper globally.
+- **Linux:** packages are unsigned. A distribution channel needs a maintained GPG key and signed repository metadata (or
+  detached checksums/signatures for direct downloads), plus an update/distribution policy. The CI artifacts alone are
+  test builds, not a trusted update channel.
+
+The xAI key still comes from the system keychain or dev env (not the installer). There is no native key-entry settings
+screen yet (`--set-key` is the setup path), no auto-updater, no release publishing and no media-store size limit.

@@ -1,0 +1,29 @@
+# Linux .deb of BuildY Chat (scripts/package.sh: wails3 tool package -format deb). Identity: internal/appid.
+name: "buildychat"
+arch: ${GOARCH}
+platform: "linux"
+version: "${BUILDYCHAT_VERSION}"
+section: "web"
+priority: "optional"
+maintainer: "BuildY"
+description: "BuildY Chat desktop: build UI8Kit pages with Grok; the xAI key stays in the system keychain."
+vendor: "BuildY"
+homepage: "https://github.com/buildytech/buildychat-desktop"
+license: "Apache-2.0"
+release: "1"
+
+contents:
+  - src: "./bin/buildychat"
+    dst: "/usr/bin/buildychat"
+  - src: "./build/appicon.png"
+    dst: "/usr/share/pixmaps/buildychat.png"
+  - src: "./build/linux/buildychat.desktop"
+    dst: "/usr/share/applications/buildychat.desktop"
+
+# GTK 4 + WebKitGTK 6.0 (Ubuntu 24.04+ / Debian 13+), as built in CI.
+depends:
+  - libgtk-4-1
+  - libwebkitgtk-6.0-4
+
+scripts:
+  postinstall: "./build/linux/nfpm/scripts/postinstall.sh"

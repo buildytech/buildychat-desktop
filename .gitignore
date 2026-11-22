@@ -1,3 +1,6 @@
 /frontend/dist/*
 !/frontend/dist/.gitkeep
 /bin/
+/dist/
+/cmd/buildychat/*.syso
+/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

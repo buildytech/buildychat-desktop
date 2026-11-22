@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=BuildY Chat
+Comment=Build UI8Kit pages with Grok
+Exec=buildychat
+Terminal=false
+Type=Application
+Icon=buildychat
+Categories=Development;
+StartupWMClass=buildychat

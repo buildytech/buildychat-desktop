@@ -14,10 +14,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	buildychat "github.com/buildytech/buildychat-desktop"
+	"github.com/buildytech/buildychat-desktop/internal/appid"
 	"github.com/buildytech/buildychat-desktop/internal/runtime"
 	"github.com/buildytech/buildychat-desktop/internal/secrets"
 	"github.com/buildytech/buildychat-desktop/internal/webapp"
@@ -55,17 +57,19 @@ func main() {
 	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app })})
 
 	app = application.New(application.Options{
-		Name:        "BuildY Chat",
+		Name:        appid.Name,
 		Description: "BuildY Chat desktop (buildytech/chat in a Wails window)",
 		Mac:         application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true},
-		Server:      serverOptions(),
+		// The WebView2 data (the web app's saved sessions) lives under the fixed app id, not the binary name.
+		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataDir()},
+		Server:  serverOptions(),
 		Assets: application.AssetOptions{
 			Handler:    webapp.Handler(buildychat.Frontend()),
 			Middleware: rt.Middleware,
 		},
 	})
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "BuildY Chat",
+		Title:  appid.Name,
 		Width:  1440,
 		Height: 900,
 		URL:    "/",
@@ -73,4 +77,13 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// webviewDataDir is <UserConfigDir>/tw.buildy.chat/WebView2 (used on Windows only).
+func webviewDataDir() string {
+	base, err := os.UserConfigDir()
+	if err != nil || base == "" {
+		return ""
+	}
+	return filepath.Join(base, appid.ID, "WebView2")
 }
