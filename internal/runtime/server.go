@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/buildytech/buildychat-desktop/internal/media"
 )
 
 // KeySource yields the xAI key and where it came from ("keychain" or "env"); "" when none is set.
@@ -29,6 +31,7 @@ type Server struct {
 	httpClient   *http.Client
 	capabilities Capabilities
 	models       modelCache
+	mediaDir     string
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -38,15 +41,20 @@ type Options struct {
 	BaseURL      string
 	Client       *http.Client
 	Capabilities *Capabilities
+	// MediaDir is the picture store (capabilities.files); default <UserConfigDir>/BuildY/media.
+	MediaDir string
 }
 
 // DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
-// (forward.go); local picture files and the native save come with phases 3 and 4.
-var DesktopCapabilities = Capabilities{Loop: "client", Files: false, SaveFile: false}
+// (forward.go); Media results are kept in a local picture store (media.go); the native save comes with phase 4.
+var DesktopCapabilities = Capabilities{Loop: "client", Files: true, SaveFile: false}
 
 // New builds the runtime.
 func New(o Options) *Server {
-	s := &Server{constants: o.Constants, keys: o.Keys, base: strings.TrimRight(strings.TrimSpace(o.BaseURL), "/"), httpClient: o.Client, capabilities: DesktopCapabilities}
+	s := &Server{constants: o.Constants, keys: o.Keys, base: strings.TrimRight(strings.TrimSpace(o.BaseURL), "/"), httpClient: o.Client, capabilities: DesktopCapabilities, mediaDir: o.MediaDir}
+	if s.mediaDir == "" {
+		s.mediaDir = media.DefaultDir()
+	}
 	if o.Capabilities != nil {
 		s.capabilities = *o.Capabilities
 	}
@@ -127,6 +135,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusOK
 		}
 		writeJSON(w, status, doc)
+	case method == http.MethodPost && (path == mediaPath || strings.HasPrefix(path, mediaPath+"/")):
+		s.media(w, r)
+	case strings.HasPrefix(path, filesPrefix):
+		s.files(w, r, path, method)
 	case strings.HasPrefix(path, forwardPrefix):
 		s.forward(w, r, path, method)
 	default:

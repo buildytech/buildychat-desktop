@@ -9,9 +9,11 @@ git submodule update --init third_party/chat
 unformatted="$(gofmt -l assets.go cmd internal)"
 [ -z "$unformatted" ] || { echo "gate: gofmt needed: $unformatted" >&2; exit 1; }
 PKGS="./ ./internal/... ./cmd/..."
-go vet $PKGS
-go test -count=1 ./ ./internal/...
-passed="$(go test -count=1 -run TestRuntimeHTTPContract -v ./internal/runtime | grep -c -- '--- PASS: TestRuntimeHTTPContract/')"
+# nodynamic: the WebP encoder is gen2brain/webp's embedded libwebp (WASM), never a system libwebp, so every build encodes alike.
+TAGS="nodynamic"
+go vet -tags "$TAGS" $PKGS
+go test -tags "$TAGS" -count=1 ./ ./internal/...
+passed="$(go test -tags "$TAGS" -count=1 -run TestRuntimeHTTPContract -v ./internal/runtime | grep -c -- '--- PASS: TestRuntimeHTTPContract/')"
 echo "gate: desktop contract cases passed: $passed"
-go build -tags server -o bin/buildychat-server ./cmd/buildychat
+go build -tags "server $TAGS" -o bin/buildychat-server ./cmd/buildychat
 echo "gate: ok (chat $(git -C third_party/chat rev-parse --short HEAD))"

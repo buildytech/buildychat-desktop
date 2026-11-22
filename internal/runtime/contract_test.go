@@ -2,11 +2,12 @@ package runtime
 
 // The desktop runner of the runtime HTTP contract (buildytech/chat contract/runtime-http, ADR 0065): every case whose
 // surfaces include "desktop", from the embedded pinned submodule, through the same middleware the app uses, with the
-// provider stubbed from the case (upstream replies expand the macros too). Files of later phases are skipped by name
-// until their handlers exist.
+// provider stubbed from the case (upstream replies expand the macros too), each case with an empty picture store
+// (or the case's `store`). Files of later phases are skipped by name until their handlers exist.
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,12 +16,14 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 
 	buildychat "github.com/buildytech/buildychat-desktop"
+	"github.com/buildytech/buildychat-desktop/internal/media"
 )
 
 const (
@@ -29,7 +32,8 @@ const (
 )
 
 // implemented lists the case files this phase serves; the rest are skipped with their phase.
-var implemented = map[string]bool{"status.json": true, "router.json": true, "xai-forward.json": true}
+var implemented = map[string]bool{"status.json": true, "router.json": true, "xai-forward.json": true,
+	"media-generate.json": true, "media-asset.json": true, "media-encode.json": true, "media-files.json": true}
 
 type bytesSpec struct {
 	Hex     *string `json:"hex"`
@@ -72,6 +76,7 @@ type contractCase struct {
 		Text    json.RawMessage   `json:"text"`
 		Bytes   *bytesSpec        `json:"bytes"`
 	} `json:"request"`
+	Store    []string   `json:"store"`
 	Upstream []upstream `json:"upstream"`
 	Expect   struct {
 		Status      int               `json:"status"`
@@ -88,6 +93,33 @@ type caseFile struct {
 
 func macros(c Constants) map[string]string {
 	return map[string]string{"$KEY": testKey, "$CONTRACT": c.Contract, "$CANDIDATE": c.CandidateChatModel, "$IMAGE_MODEL": c.Images.Model}
+}
+
+var fileMacro = regexp.MustCompile(`\$FILE:([A-Za-z0-9._-]+)`)
+
+// expandFiles replaces $FILE:<picture> with the store address of that file of pictures/ (sha256 of its bytes).
+func expandFiles(contract fs.FS, text string) string {
+	return fileMacro.ReplaceAllStringFunc(text, func(m string) string {
+		name := m[len("$FILE:"):]
+		raw, err := fs.ReadFile(contract, "pictures/"+name)
+		if err != nil {
+			panic(err)
+		}
+		sum := sha256.Sum256(raw)
+		ext := name[strings.LastIndexByte(name, '.')+1:]
+		if ext == "jpeg" {
+			ext = "jpg"
+		}
+		return media.FilesPrefix + hex.EncodeToString(sum[:]) + "." + ext
+	})
+}
+
+// expandFilesRaw applies expandFiles to a JSON document (addresses need no escaping).
+func expandFilesRaw(contract fs.FS, raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	return json.RawMessage(expandFiles(contract, string(raw)))
 }
 
 // expand resolves the value macros and {"$repeat": [text, count]}.
@@ -289,12 +321,26 @@ func (k fixedKey) Key() (string, string) {
 
 func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) []string {
 	m := macros(constants)
+	c.Request.Path = expandFiles(contract, c.Request.Path)
+	c.Request.Query = expandFiles(contract, c.Request.Query)
+	c.Request.JSON = expandFilesRaw(contract, c.Request.JSON)
+	c.Expect.JSON = expandFilesRaw(contract, c.Expect.JSON)
 	st := &stub{contract: contract, m: m, entries: c.Upstream, used: make([]bool, len(c.Upstream))}
 	key := fixedKey("")
 	if c.Env.Key {
 		key = testKey
 	}
-	srv := New(Options{Constants: constants, Keys: key, BaseURL: testBase, Client: &http.Client{Transport: st}})
+	dir := t.TempDir()
+	for _, name := range c.Store {
+		raw, err := fs.ReadFile(contract, "pictures/"+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (media.Store{Dir: dir}).Put(raw, media.TypeOf(expandFiles(contract, "$FILE:"+name))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := New(Options{Constants: constants, Keys: key, BaseURL: testBase, Client: &http.Client{Transport: st}, MediaDir: dir})
 	static := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "web app", http.StatusTeapot) })
 	handler := srv.Middleware(static)
 
@@ -405,7 +451,7 @@ func TestRuntimeHTTPContract(t *testing.T) {
 			c := c
 			t.Run(base+": "+c.Name, func(t *testing.T) {
 				if !implemented[base] {
-					t.Skip("handler comes in a later phase (media: phase 3)")
+					t.Skip("handler comes in a later phase")
 				}
 				for _, p := range runCase(t, contract, constants, c) {
 					t.Error(p)
@@ -417,7 +463,7 @@ func TestRuntimeHTTPContract(t *testing.T) {
 		}
 	}
 	t.Logf("desktop contract cases run: %d", ran)
-	if ran < 10 {
+	if ran < 60 {
 		t.Fatalf("only %d desktop cases ran", ran)
 	}
 }

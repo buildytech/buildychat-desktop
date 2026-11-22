@@ -12,6 +12,9 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
+    env:
+      # The WebP encoder is gen2brain/webp's embedded libwebp, never a system one (scripts/gate.sh).
+      TAGS: nodynamic
     defaults:
       run:
         shell: bash
@@ -31,13 +34,13 @@ jobs:
       - name: Frontend from the pinned chat submodule
         run: bash scripts/build-frontend.sh
       - name: Vet
-        run: go vet ./ ./internal/... ./cmd/...
-      - name: Tests (unit + runtime HTTP contract, desktop surface)
-        run: go test -count=1 -v ./ ./internal/...
+        run: go vet -tags "$TAGS" ./ ./internal/... ./cmd/...
+      - name: Tests (unit, runtime HTTP contract on the desktop surface, WebP goldens)
+        run: go test -tags "$TAGS" -count=1 -v ./ ./internal/...
       - name: Headless build (server tag)
-        run: go build -tags server -o bin/buildychat-server ./cmd/buildychat
+        run: go build -tags "server $TAGS" -o bin/buildychat-server ./cmd/buildychat
       - name: Desktop build
-        run: go build -o bin/buildychat ./cmd/buildychat
+        run: go build -tags "$TAGS" -o bin/buildychat ./cmd/buildychat
       - uses: actions/upload-artifact@v4
         with:
           name: buildychat-${{ matrix.os }}

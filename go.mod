@@ -3,6 +3,8 @@ module github.com/buildytech/buildychat-desktop
 go 1.26.0
 
 require (
+	github.com/disintegration/imaging v1.6.2
+	github.com/gen2brain/webp v0.6.4
 	github.com/wailsapp/wails/v3 v3.1.0
 	github.com/zalando/go-keyring v0.2.8
 )
@@ -13,6 +15,7 @@ require (
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 )
