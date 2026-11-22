@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -254,16 +255,23 @@ func (s *Server) result(ctx context.Context, key, id string) (obj, error) {
 	if c, isNum := payload.Usage.Cost.(float64); isNum && !math.IsInf(c, 0) && !math.IsNaN(c) {
 		cost = c
 	}
-	// The desktop keeps every candidate: the URL expires, the stored copy does not. A failed download keeps the URL.
+	// The desktop keeps every candidate: the URL expires, the stored copy does not. The downloads run side by side, each
+	// with its own timeout (not the poll's); a failed download keeps the URL.
+	var wg sync.WaitGroup
 	for i, u := range urls {
-		got := s.fetchPicture(ctx, u, s.constants.Asset.MaxBytes)
-		if got.code != "" {
-			continue
-		}
-		if name, err := s.store().Put(got.data, got.typ); err == nil {
-			urls[i] = media.FilesPrefix + name
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got := s.fetchPicture(context.WithoutCancel(ctx), u, s.constants.Asset.MaxBytes)
+			if got.code != "" {
+				return
+			}
+			if name, err := s.store().Put(got.data, got.typ); err == nil {
+				urls[i] = media.FilesPrefix + name
+			}
+		}()
 	}
+	wg.Wait()
 	return obj{"ok": true, "status": "done", "urls": urls, "costUsdTicks": cost}, nil
 }
 
