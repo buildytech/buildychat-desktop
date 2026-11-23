@@ -70,6 +70,7 @@ func forwardError(w http.ResponseWriter, status int, code, message string) {
 
 // target is one provider's forward.
 type target struct {
+	id          string // the provider id (ADR 0068)
 	name        string // in messages and logs
 	path        string
 	url         string
@@ -89,7 +90,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, path, method st
 		key, _ = s.keys.Key()
 	}
 	s.forwardTo(w, r, path, method, target{
-		name: "xAI", path: forwardPath, url: s.baseURL() + "/chat/completions", key: key,
+		id: "xai", name: "xAI", path: forwardPath, url: s.baseURL() + "/chat/completions", key: key,
 		missingCode: "xai_api_key_missing", failCode: "xai_forward_failed",
 		headers: map[string]string{"Accept": "Accept", "Content-Type": "Content-Type", "X-Grok-Conv-Id": "X-Grok-Conv-Id"},
 		models: func(ctx context.Context) ([]string, string) {
@@ -101,7 +102,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, path, method st
 func (s *Server) orForward(w http.ResponseWriter, r *http.Request, path, method string) {
 	key := s.orKey()
 	s.forwardTo(w, r, path, method, target{
-		name: "OpenRouter", path: orForwardPath, url: s.orBaseURL() + "/chat/completions", key: key,
+		id: "openrouter", name: "OpenRouter", path: orForwardPath, url: s.orBaseURL() + "/chat/completions", key: key,
 		missingCode: "openrouter_key_missing", failCode: "openrouter_forward_failed",
 		headers: map[string]string{"Accept": "Accept", "Content-Type": "Content-Type", "X-Grok-Conv-Id": s.constants.OpenRouter.SessionHeader},
 		extra:   openRouterAttribution,
@@ -143,6 +144,12 @@ func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, path, method 
 	}
 	if body.Model == nil || strings.TrimSpace(*body.Model) == "" {
 		forwardError(w, http.StatusBadRequest, "invalid_request", "The request names no model.")
+		return
+	}
+	// The owner's approved chat list narrows (ADR 0068), checked before any provider call; it never widens the
+	// listing below.
+	if list, narrowed := s.approvedList(t.id, "chat"); narrowed && !contains(list, *body.Model) {
+		forwardError(w, http.StatusForbidden, "model_not_approved", "That chat model is not approved in Settings. No chat request was sent.")
 		return
 	}
 	ids, code := t.models(r.Context())
@@ -189,6 +196,7 @@ func (s *Server) forwardTo(w http.ResponseWriter, r *http.Request, path, method 
 		forwardError(w, http.StatusBadGateway, t.failCode, "The "+t.name+" chat answer could not be read.")
 		return
 	}
+	s.noteProvider(t.id, res.StatusCode, answer)
 	answer = bytes.ReplaceAll(answer, []byte(t.key), []byte("[redacted]"))
 	for _, name := range forwardAnswerHeaders {
 		if v := res.Header.Get(name); v != "" {

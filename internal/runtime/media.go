@@ -60,6 +60,8 @@ func jsLength(s string) int { return len(utf16.Encode([]rune(s))) }
 func classifyFailure(status int, snippet string) (string, string) {
 	lower := strings.ToLower(snippet)
 	switch {
+	case isProviderLimit(status, snippet):
+		return "provider_limit", "The provider key reached its credit or spending limit."
 	case status == 401:
 		return "provider_unauthorized", "The provider rejected authentication."
 	case status == 403:
@@ -109,9 +111,20 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 	if s.keys != nil {
 		key, _ = s.keys.Key()
 	}
-	if orKey := s.orKey(); orKey != "" && body["action"] == "generate" {
-		s.orMedia(w, r.Context(), body, orKey)
-		return
+	if body["action"] == "generate" {
+		provider, refused := s.drawProvider(w, body)
+		if refused {
+			return
+		}
+		if provider == "openrouter" {
+			orKey := s.orKey()
+			if orKey == "" {
+				mediaJSON(w, http.StatusServiceUnavailable, obj{"ok": false, "code": "openrouter_key_missing", "message": "No OpenRouter key is stored on this computer. No provider call was made."})
+				return
+			}
+			s.orMedia(w, r.Context(), body, orKey)
+			return
+		}
 	}
 	if key == "" {
 		mediaJSON(w, http.StatusServiceUnavailable, obj{"ok": false, "code": "xai_api_key_missing", "message": "No xAI key is stored on this computer. No provider call was made."})
@@ -131,12 +144,14 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 		}
 		out, err = s.generate(ctx, key, strings.TrimSpace(prompt), aspect, n)
 		ok = http.StatusAccepted
+		s.noteDraw("xai", out, err)
 		if err == nil {
 			log.Printf("runtime media generate ok=%v n=%d %dms", out["ok"], n, time.Since(started).Milliseconds())
 		}
 	case "result":
 		id, _ := body["requestId"].(string)
 		out, err = s.result(ctx, key, id)
+		s.noteDraw("xai", out, err)
 		if err == nil && (out["ok"] != true || out["status"] == "done") {
 			log.Printf("runtime media result ok=%v code=%v %dms", out["ok"], out["code"], time.Since(started).Milliseconds())
 		}
@@ -180,6 +195,7 @@ func (s *Server) orMedia(w http.ResponseWriter, ctx context.Context, body obj, k
 	}
 	started := time.Now()
 	out, err := s.orGenerate(ctx, key, prompt, aspect, n)
+	s.noteDraw("openrouter", out, err)
 	if err != nil {
 		log.Printf("runtime media openrouter failed %dms", time.Since(started).Milliseconds())
 		mediaJSON(w, http.StatusBadGateway, obj{"ok": false, "code": "error", "message": mediaFailMessage})
@@ -508,5 +524,48 @@ func (s *Server) files(w http.ResponseWriter, r *http.Request, path, method stri
 	w.WriteHeader(http.StatusOK)
 	if method == http.MethodGet {
 		_, _ = w.Write(data)
+	}
+}
+
+// drawProvider reads a generate's `provider` and `model` (ADR 0068) and refuses, before any provider call: an unknown
+// provider (422), a provider this host does not draw with (409 provider_role_disabled), a model that is not that
+// provider's image model (422 model_not_allowed) and one outside the owner's approved image list (403
+// model_not_approved). Absent provider is xai: never whatever other key the host holds.
+func (s *Server) drawProvider(w http.ResponseWriter, body obj) (string, bool) {
+	provider := "xai"
+	if v, has := body["provider"]; has {
+		id, isText := v.(string)
+		if !isText || !contains(s.constants.Providers.IDs, id) {
+			mediaJSON(w, http.StatusUnprocessableEntity, obj{"ok": false, "code": "invalid_request", "message": "provider is xai or openrouter."})
+			return "", true
+		}
+		provider = id
+	}
+	if !contains(s.roles(provider), "media") {
+		mediaJSON(w, http.StatusConflict, obj{"ok": false, "code": "provider_role_disabled", "message": "This host does not draw pictures with that provider. No provider call was made."})
+		return "", true
+	}
+	model := s.imageModel(provider)
+	if v, has := body["model"]; has && v != model {
+		mediaJSON(w, http.StatusUnprocessableEntity, obj{"ok": false, "code": "model_not_allowed", "message": "That model does not draw pictures on this host. No provider call was made."})
+		return "", true
+	}
+	if list, narrowed := s.approvedList(provider, "image"); narrowed && !contains(list, model) {
+		mediaJSON(w, http.StatusForbidden, obj{"ok": false, "code": "model_not_approved", "message": "That image model is not approved in Settings. No provider call was made."})
+		return "", true
+	}
+	return provider, false
+}
+
+// noteDraw keeps a provider's limit state from a draw's outcome.
+func (s *Server) noteDraw(id string, out obj, err error) {
+	if err != nil || out == nil {
+		return
+	}
+	switch {
+	case out["code"] == "provider_limit":
+		s.markLimit(id)
+	case out["ok"] == true:
+		s.limits.clear(id)
 	}
 }

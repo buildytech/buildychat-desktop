@@ -44,7 +44,8 @@ const (
 // implemented lists the case files this phase serves; the rest are skipped with their phase.
 var implemented = map[string]bool{"status.json": true, "router.json": true, "xai-forward.json": true,
 	"media-generate.json": true, "media-asset.json": true, "media-encode.json": true, "media-files.json": true, "export.json": true,
-	"openrouter-auth.json": true, "openrouter-forward.json": true, "media-openrouter.json": true}
+	"openrouter-auth.json": true, "openrouter-forward.json": true, "media-openrouter.json": true,
+	"media-provider.json": true, "provider-settings.json": true, "keys-xai.json": true}
 
 type bytesSpec struct {
 	Hex     *string `json:"hex"`
@@ -77,10 +78,14 @@ type contractCase struct {
 	Name     string   `json:"name"`
 	Surfaces []string `json:"surfaces"`
 	Env      struct {
-		Key           bool   `json:"key"`
-		Save          string `json:"save"`
-		OpenRouter    bool   `json:"openrouter"`
-		PendingSignIn *struct {
+		Key        bool   `json:"key"`
+		Save       string `json:"save"`
+		OpenRouter bool   `json:"openrouter"`
+		// ADR 0068: OpenRouter pictures switched on, providers seen at a limit, the saved approved lists.
+		OpenRouterMedia bool            `json:"openrouterMedia"`
+		Limited         []string        `json:"limited"`
+		Approved        json.RawMessage `json:"approved"`
+		PendingSignIn   *struct {
 			State    string `json:"state"`
 			Verifier string `json:"verifier"`
 			Expired  bool   `json:"expired"`
@@ -109,6 +114,10 @@ type contractCase struct {
 		Opened       string            `json:"opened"`
 		SignedIn     *bool             `json:"signedIn"`
 		PendingAfter *bool             `json:"pendingAfter"`
+		// ADR 0068: providers marked limited, the approved lists kept, the xAI key the keychain holds after the request.
+		LimitedAfter  []string        `json:"limitedAfter"`
+		ApprovedAfter json.RawMessage `json:"approvedAfter"`
+		XAIKeyAfter   *string         `json:"xaiKeyAfter"`
 	} `json:"expect"`
 }
 
@@ -416,9 +425,10 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 	c.Request.JSON = expandFilesRaw(contract, c.Request.JSON)
 	c.Expect.JSON = expandFilesRaw(contract, c.Expect.JSON)
 	st := &stub{contract: contract, m: m, entries: c.Upstream, used: make([]bool, len(c.Upstream))}
-	key := fixedKey("")
+	// The xAI keychain item of the case: writable, so Settings can store and remove it (cases/keys-xai.json).
+	key := &memoryKeys{}
 	if c.Env.Key {
-		key = testKey
+		key.key = testKey
 	}
 	dir := t.TempDir()
 	for _, name := range c.Store {
@@ -448,9 +458,20 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 		orKeys.key = testORKey
 	}
 	var opened []string
+	orMedia := c.Env.OpenRouterMedia
 	srv := New(Options{Constants: constants, Keys: key, BaseURL: testBase, Client: &http.Client{Transport: st}, MediaDir: dir, Saver: saver,
-		OpenRouter: orKeys, OpenRouterBaseURL: testORBase, OpenURL: func(u string) error { opened = append(opened, u); return nil }})
+		OpenRouter: orKeys, OpenRouterBaseURL: testORBase, OpenURL: func(u string) error { opened = append(opened, u); return nil },
+		SettingsFile: filepath.Join(t.TempDir(), "providers.json"), OpenRouterMedia: &orMedia})
 	defer srv.Close()
+	for _, id := range c.Env.Limited {
+		srv.markLimit(id)
+	}
+	if v, ok := decode(c.Env.Approved); ok {
+		raw, _ := json.Marshal(expand(v, m))
+		if _, err := srv.mergeApproved(raw); err != nil {
+			t.Fatalf("env.approved: %v", err)
+		}
+	}
 	if p := c.Env.PendingSignIn; p != nil {
 		expires := time.Now().Add(time.Minute)
 		if p.Expired {
@@ -537,6 +558,22 @@ func runCase(t *testing.T, contract fs.FS, constants Constants, c contractCase) 
 	}
 	if c.Expect.PendingAfter != nil && srv.signInPending() != *c.Expect.PendingAfter {
 		problems = append(problems, fmt.Sprintf("pendingAfter: expected %v", *c.Expect.PendingAfter))
+	}
+	for _, id := range c.Expect.LimitedAfter {
+		if !srv.limited(id) {
+			problems = append(problems, "limitedAfter: "+id+" is not marked limited")
+		}
+	}
+	if want, ok := decode(c.Expect.ApprovedAfter); ok {
+		var got any
+		raw, _ := json.Marshal(srv.approved())
+		_ = json.Unmarshal(raw, &got)
+		matches(got, expand(want, m), "approvedAfter", &problems)
+	}
+	if c.Expect.XAIKeyAfter != nil {
+		if got, _ := key.Key(); got != *c.Expect.XAIKeyAfter {
+			problems = append(problems, fmt.Sprintf("xaiKeyAfter: expected %q stored", *c.Expect.XAIKeyAfter))
+		}
 	}
 	words := append([]string{testKey, testORKey}, c.Expect.NotContains...)
 	for _, w := range words {

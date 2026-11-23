@@ -44,6 +44,12 @@ func (k Keys) Key() (string, string) {
 	return "", ""
 }
 
+// Store saves the key in the OS keychain (Settings, ADR 0068: Keys is the runtime's writable xAI key store).
+func (Keys) Store(key string) error { return Store(key) }
+
+// Forget removes the keychain item.
+func (Keys) Forget() error { return Forget() }
+
 // Store saves the key in the OS keychain.
 func Store(key string) error {
 	key = strings.TrimSpace(key)

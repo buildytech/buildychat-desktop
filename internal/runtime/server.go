@@ -6,9 +6,11 @@ package runtime
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	goruntime "runtime"
 	"strings"
+	"sync"
 
 	"github.com/buildytech/buildychat-desktop/internal/media"
 )
@@ -25,6 +27,10 @@ type Capabilities struct {
 	SaveFile bool   `json:"saveFile"`
 	// SignIn lists the sign-ins the host offers (ADR 0067): "openrouter" when it can keep an OpenRouter key.
 	SignIn []string `json:"signIn,omitempty"`
+	// Keys lists the keys the owner can type in Settings (ADR 0068): "xai" when the xAI key store is writable.
+	Keys []string `json:"keys,omitempty"`
+	// Settings lists the settings this host keeps and enforces (ADR 0068): "providers", the approved-model lists.
+	Settings []string `json:"settings,omitempty"`
 }
 
 // Host is the optional `host` of /v1/status (contract/runtime-http/host.schema.json): the desktop host names itself,
@@ -53,6 +59,10 @@ type Server struct {
 	orModels     modelCache
 	openURL      func(string) error
 	auth         signInState
+	limits       limits
+	settingsFile string
+	settingsMu   sync.Mutex
+	orPictures   bool
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -75,12 +85,16 @@ type Options struct {
 	OpenRouterBaseURL string
 	// OpenURL opens the sign-in page in the system browser (Wails app.Browser.OpenURL); nil: the webview gets the URL only.
 	OpenURL func(string) error
+	// SettingsFile keeps the approved-model lists (ADR 0068); default <UserConfigDir>/BuildY/providers.json.
+	SettingsFile string
+	// OpenRouterMedia overrides constants.openrouter.mediaEnabled (the contract runner's env.openrouterMedia).
+	OpenRouterMedia *bool
 }
 
 // DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
 // (forward.go); Media results are kept in a local picture store (media.go); the ZIP export is saved natively when a
 // Saver is configured (export.go; SaveFile follows Options.Saver).
-var DesktopCapabilities = Capabilities{Loop: "client", Files: true, SaveFile: true}
+var DesktopCapabilities = Capabilities{Loop: "client", Files: true, SaveFile: true, Settings: []string{"providers"}}
 
 // New builds the runtime.
 func New(o Options) *Server {
@@ -96,6 +110,17 @@ func New(o Options) *Server {
 	s.orKeys, s.orBase, s.openURL = o.OpenRouter, strings.TrimRight(strings.TrimSpace(o.OpenRouterBaseURL), "/"), o.OpenURL
 	if s.orKeys != nil && o.Capabilities == nil {
 		s.capabilities.SignIn = []string{"openrouter"}
+	}
+	if _, writable := o.Keys.(KeyStore); writable && o.Capabilities == nil {
+		s.capabilities.Keys = []string{"xai"}
+	}
+	s.settingsFile = o.SettingsFile
+	if s.settingsFile == "" {
+		s.settingsFile = filepath.Join(filepath.Dir(media.DefaultDir()), "providers.json")
+	}
+	s.orPictures = o.Constants.OpenRouter.MediaEnabled
+	if o.OpenRouterMedia != nil {
+		s.orPictures = *o.OpenRouterMedia
 	}
 	return s
 }
@@ -194,6 +219,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.forward(w, r, path, method)
 	case strings.HasPrefix(path, orForwardPrefix) && s.orKeys != nil:
 		s.orForward(w, r, path, method)
+	case strings.HasPrefix(path, settingsPrefix):
+		s.settingsRoute(w, r, path, method)
+	case strings.HasPrefix(path, keysPrefix):
+		s.keysRoute(w, r, path, method)
 	case strings.HasPrefix(path, authPrefix):
 		s.authRoute(w, r, path, method)
 	default:

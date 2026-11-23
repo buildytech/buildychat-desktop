@@ -17,6 +17,8 @@ type StatusDoc struct {
 	Capabilities     Capabilities `json:"capabilities"`
 	Host             Host         `json:"host"`
 	Provider         *Provider    `json:"provider,omitempty"`
+	// Providers lists every provider this host can serve (ADR 0068).
+	Providers []ProviderEntry `json:"providers,omitempty"`
 }
 
 type KeyState struct {
@@ -43,15 +45,29 @@ func (s *Server) status(ctx context.Context) StatusDoc {
 	if s.keys != nil {
 		key, source = s.keys.Key()
 	}
+	orKey, orSource := "", ""
+	if s.orKeys != nil {
+		orKey, orSource = s.orKeys.Key()
+	}
+	// Each provider is discovered with its own key (ADR 0068); no key, not asked.
+	var xd, od *discovered
+	if key != "" {
+		d := s.discover(ctx, key)
+		xd = &d
+	}
+	if orKey != "" {
+		d := s.orDiscover(ctx, orKey)
+		od = &d
+	}
+	providers := []ProviderEntry{s.providerEntry("xai", source, xd), s.providerEntry("openrouter", orSource, od)}
 	var provider *Provider
-	discover := s.discover
+	top := xd
 	if s.orKeys != nil {
 		p := s.provider()
 		provider = &p
 		if p.SignedIn {
-			// Signed in with OpenRouter: its key serves, xAI is not asked (ADR 0067).
-			key, source = s.orKeys.Key()
-			discover = s.orDiscover
+			// The top-level fields stay OpenRouter's when signed in (ADR 0067), for older apps.
+			key, source, top = orKey, orSource, od
 		}
 	}
 	present := key != ""
@@ -64,11 +80,12 @@ func (s *Server) status(ctx context.Context) StatusDoc {
 		Capabilities:     s.capabilities,
 		Host:             s.host,
 		Provider:         provider,
+		Providers:        providers,
 	}
 	discoverCode := "xai_api_key_missing"
 	if present {
 		doc.Key = KeyState{Present: true, Source: &source}
-		d := discover(ctx, key)
+		d := *top
 		doc.Models.Listed = d.ok || len(d.chatIDs) > 0 || len(d.ids) > 0
 		doc.Models.ChatIDs = d.chatIDs
 		doc.Models.ImageIDs = d.imageIDs

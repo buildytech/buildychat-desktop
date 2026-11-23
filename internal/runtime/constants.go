@@ -66,7 +66,22 @@ type Constants struct {
 		Discovery          []string `json:"discovery"`
 		SessionHeader      string   `json:"sessionHeader"`
 		USDTicks           float64  `json:"usdTicks"`
+		// MediaEnabled switches OpenRouter pictures on (ADR 0068: off for now, 409 provider_role_disabled).
+		MediaEnabled bool `json:"mediaEnabled"`
 	} `json:"openrouter"`
+	// Providers is a provider per role (ADR 0068).
+	Providers struct {
+		IDs             []string            `json:"ids"`
+		Roles           []string            `json:"roles"`
+		Kinds           []string            `json:"kinds"`
+		RoleSupport     map[string][]string `json:"roleSupport"`
+		LimitTTLSeconds int                 `json:"limitTtlSeconds"`
+		Approved        struct {
+			MaxIDs    int    `json:"maxIds"`
+			IDPattern string `json:"idPattern"`
+		} `json:"approved"`
+		XAIKeyMax int `json:"xaiKeyMax"`
+	} `json:"providers"`
 }
 
 // LoadConstants reads constants.json from the embedded contract.
@@ -88,7 +103,9 @@ func LoadConstants(contract fs.FS) (Constants, error) {
 		c.OpenRouter.BaseURL == "" || c.OpenRouter.AuthURL == "" || c.OpenRouter.KeysPath == "" || c.OpenRouter.Callback.Host == "" ||
 		c.OpenRouter.Callback.PathPrefix == "" || c.OpenRouter.Callback.TTLSeconds < 1 || len(c.OpenRouter.ChatModels) == 0 ||
 		c.OpenRouter.CandidateChatModel == "" || c.OpenRouter.ImageModel == "" || len(c.OpenRouter.Discovery) != 2 ||
-		c.OpenRouter.SessionHeader == "" || c.OpenRouter.USDTicks <= 0 {
+		c.OpenRouter.SessionHeader == "" || c.OpenRouter.USDTicks <= 0 ||
+		len(c.Providers.IDs) == 0 || len(c.Providers.Kinds) == 0 || len(c.Providers.RoleSupport) == 0 || c.Providers.LimitTTLSeconds < 1 ||
+		c.Providers.Approved.MaxIDs < 1 || c.Providers.Approved.IDPattern == "" || c.Providers.XAIKeyMax < 1 {
 		return c, fmt.Errorf("contract constants: incomplete constants.json")
 	}
 	return c, nil

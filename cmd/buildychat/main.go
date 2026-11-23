@@ -72,11 +72,17 @@ func main() {
 			Middleware: rt.Middleware,
 		},
 	})
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	var mainWindow *application.WebviewWindow
+	if menu := appMenu(app, func() *application.WebviewWindow { return mainWindow }); menu != nil {
+		app.Menu.Set(menu)
+	}
+	mainWindow = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:  appid.Name,
 		Width:  1440,
 		Height: 900,
 		URL:    "/",
+		// Windows and Linux show the application menu (Settings…, ADR 0068) in the window.
+		UseApplicationMenu: true,
 	})
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
