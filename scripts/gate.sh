@@ -12,7 +12,7 @@ PKGS="./ ./internal/... ./cmd/..."
 # nodynamic: the WebP encoder is gen2brain/webp's embedded libwebp (WASM), never a system libwebp, so every build encodes alike.
 TAGS="nodynamic"
 go vet -tags "$TAGS" $PKGS
-go test -tags "$TAGS" -count=1 ./ ./internal/...
+go test -tags "$TAGS" -count=1 ./ ./internal/... ./cmd/...
 passed="$(go test -tags "$TAGS" -count=1 -run TestRuntimeHTTPContract -v ./internal/runtime | grep -c -- '--- PASS: TestRuntimeHTTPContract/')"
 echo "gate: desktop contract cases passed: $passed"
 go build -tags "server $TAGS" -o bin/buildychat-server ./cmd/buildychat
