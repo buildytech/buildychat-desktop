@@ -50,6 +50,23 @@ type Constants struct {
 		DevVersion string `json:"devVersion"`
 		Version    string `json:"version"`
 	} `json:"host"`
+	// OpenRouter is the desktop's second provider (ADR 0067): sign-in, forward and draws.
+	OpenRouter struct {
+		BaseURL  string `json:"baseUrl"`
+		AuthURL  string `json:"authUrl"`
+		KeysPath string `json:"keysPath"`
+		Callback struct {
+			Host       string `json:"host"`
+			PathPrefix string `json:"pathPrefix"`
+			TTLSeconds int    `json:"ttlSeconds"`
+		} `json:"callback"`
+		ChatModels         []string `json:"chatModels"`
+		CandidateChatModel string   `json:"candidateChatModel"`
+		ImageModel         string   `json:"imageModel"`
+		Discovery          []string `json:"discovery"`
+		SessionHeader      string   `json:"sessionHeader"`
+		USDTicks           float64  `json:"usdTicks"`
+	} `json:"openrouter"`
 }
 
 // LoadConstants reads constants.json from the embedded contract.
@@ -67,7 +84,11 @@ func LoadConstants(contract fs.FS) (Constants, error) {
 		len(c.Asset.Hosts) == 0 || len(c.Asset.Types) == 0 || c.Asset.MaxBytes < 1 ||
 		len(c.Encode.Types) == 0 || len(c.Encode.Tiers) == 0 || c.Encode.MaxBytes < 1 || c.Encode.MaxURLBytes < 1 ||
 		c.Export.MaxBytes < 1 || c.Export.Name == "" || c.Export.FallbackName == "" ||
-		c.Host.Kind == "" || c.Host.DevVersion == "" || c.Host.Version == "" {
+		c.Host.Kind == "" || c.Host.DevVersion == "" || c.Host.Version == "" ||
+		c.OpenRouter.BaseURL == "" || c.OpenRouter.AuthURL == "" || c.OpenRouter.KeysPath == "" || c.OpenRouter.Callback.Host == "" ||
+		c.OpenRouter.Callback.PathPrefix == "" || c.OpenRouter.Callback.TTLSeconds < 1 || len(c.OpenRouter.ChatModels) == 0 ||
+		c.OpenRouter.CandidateChatModel == "" || c.OpenRouter.ImageModel == "" || len(c.OpenRouter.Discovery) != 2 ||
+		c.OpenRouter.SessionHeader == "" || c.OpenRouter.USDTicks <= 0 {
 		return c, fmt.Errorf("contract constants: incomplete constants.json")
 	}
 	return c, nil

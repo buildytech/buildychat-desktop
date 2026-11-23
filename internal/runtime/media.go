@@ -109,6 +109,10 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 	if s.keys != nil {
 		key, _ = s.keys.Key()
 	}
+	if orKey := s.orKey(); orKey != "" && body["action"] == "generate" {
+		s.orMedia(w, r.Context(), body, orKey)
+		return
+	}
 	if key == "" {
 		mediaJSON(w, http.StatusServiceUnavailable, obj{"ok": false, "code": "xai_api_key_missing", "message": "No xAI key is stored on this computer. No provider call was made."})
 		return
@@ -121,15 +125,9 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 	ok := http.StatusOK
 	switch body["action"] {
 	case "generate":
-		prompt, _ := body["prompt"].(string)
-		aspect, _ := body["aspect"].(string)
-		if strings.TrimSpace(prompt) == "" || jsLength(prompt) > s.constants.Images.MaxPrompt || !slices.Contains(s.constants.Images.Aspects, aspect) {
-			mediaJSON(w, http.StatusUnprocessableEntity, obj{"ok": false, "code": "invalid_request", "message": fmt.Sprintf("A prompt (up to %d characters) and a supported aspect are required.", s.constants.Images.MaxPrompt)})
+		prompt, aspect, n, valid := s.drawRequest(w, body)
+		if !valid {
 			return
-		}
-		n := s.constants.Images.MaxCandidates
-		if v, isNum := body["n"].(float64); isNum {
-			n = int(math.Max(1, math.Min(float64(n), math.Trunc(v))))
 		}
 		out, err = s.generate(ctx, key, strings.TrimSpace(prompt), aspect, n)
 		ok = http.StatusAccepted
@@ -156,6 +154,44 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 		ok = http.StatusBadGateway
 	}
 	mediaJSON(w, ok, out)
+}
+
+// drawRequest reads and checks a generate body (answering 422 when it is not one): the trimmed prompt, the aspect and
+// the number of candidates (capped).
+func (s *Server) drawRequest(w http.ResponseWriter, body obj) (string, string, int, bool) {
+	prompt, _ := body["prompt"].(string)
+	aspect, _ := body["aspect"].(string)
+	if strings.TrimSpace(prompt) == "" || jsLength(prompt) > s.constants.Images.MaxPrompt || !slices.Contains(s.constants.Images.Aspects, aspect) {
+		mediaJSON(w, http.StatusUnprocessableEntity, obj{"ok": false, "code": "invalid_request", "message": fmt.Sprintf("A prompt (up to %d characters) and a supported aspect are required.", s.constants.Images.MaxPrompt)})
+		return "", "", 0, false
+	}
+	n := s.constants.Images.MaxCandidates
+	if v, isNum := body["n"].(float64); isNum {
+		n = int(math.Max(1, math.Min(float64(n), math.Trunc(v))))
+	}
+	return strings.TrimSpace(prompt), aspect, n, true
+}
+
+// orMedia is generate signed in with OpenRouter: one synchronous draw, answered done (cases/media-openrouter.json).
+func (s *Server) orMedia(w http.ResponseWriter, ctx context.Context, body obj, key string) {
+	prompt, aspect, n, valid := s.drawRequest(w, body)
+	if !valid {
+		return
+	}
+	started := time.Now()
+	out, err := s.orGenerate(ctx, key, prompt, aspect, n)
+	if err != nil {
+		log.Printf("runtime media openrouter failed %dms", time.Since(started).Milliseconds())
+		mediaJSON(w, http.StatusBadGateway, obj{"ok": false, "code": "error", "message": mediaFailMessage})
+		return
+	}
+	log.Printf("runtime media openrouter generate ok=%v n=%d %dms", out["ok"], n, time.Since(started).Milliseconds())
+	out["model"] = s.constants.OpenRouter.ImageModel
+	status := http.StatusOK
+	if out["ok"] != true {
+		status = http.StatusBadGateway
+	}
+	mediaJSON(w, status, out)
 }
 
 // call sends one keyed provider request and reads at most 1 MB of its answer.

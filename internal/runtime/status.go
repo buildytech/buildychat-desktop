@@ -16,6 +16,7 @@ type StatusDoc struct {
 	Contract         string       `json:"contract"`
 	Capabilities     Capabilities `json:"capabilities"`
 	Host             Host         `json:"host"`
+	Provider         *Provider    `json:"provider,omitempty"`
 }
 
 type KeyState struct {
@@ -42,6 +43,17 @@ func (s *Server) status(ctx context.Context) StatusDoc {
 	if s.keys != nil {
 		key, source = s.keys.Key()
 	}
+	var provider *Provider
+	discover := s.discover
+	if s.orKeys != nil {
+		p := s.provider()
+		provider = &p
+		if p.SignedIn {
+			// Signed in with OpenRouter: its key serves, xAI is not asked (ADR 0067).
+			key, source = s.orKeys.Key()
+			discover = s.orDiscover
+		}
+	}
 	present := key != ""
 	doc := StatusDoc{
 		Runtime:          s.constants.Runtime,
@@ -51,11 +63,12 @@ func (s *Server) status(ctx context.Context) StatusDoc {
 		Contract:         s.constants.Contract,
 		Capabilities:     s.capabilities,
 		Host:             s.host,
+		Provider:         provider,
 	}
 	discoverCode := "xai_api_key_missing"
 	if present {
 		doc.Key = KeyState{Present: true, Source: &source}
-		d := s.discover(ctx, key)
+		d := discover(ctx, key)
 		doc.Models.Listed = d.ok || len(d.chatIDs) > 0 || len(d.ids) > 0
 		doc.Models.ChatIDs = d.chatIDs
 		doc.Models.ImageIDs = d.imageIDs

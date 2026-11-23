@@ -23,6 +23,8 @@ type Capabilities struct {
 	Loop     string `json:"loop"`
 	Files    bool   `json:"files"`
 	SaveFile bool   `json:"saveFile"`
+	// SignIn lists the sign-ins the host offers (ADR 0067): "openrouter" when it can keep an OpenRouter key.
+	SignIn []string `json:"signIn,omitempty"`
 }
 
 // Host is the optional `host` of /v1/status (contract/runtime-http/host.schema.json): the desktop host names itself,
@@ -46,6 +48,11 @@ type Server struct {
 	saver        Saver
 	exportName   *regexp.Regexp
 	host         Host
+	orKeys       KeyStore
+	orBase       string
+	orModels     modelCache
+	openURL      func(string) error
+	auth         signInState
 }
 
 // Options configure a Server. BaseURL defaults to the contract's xAI base URL; Client to a client without redirects.
@@ -62,6 +69,12 @@ type Options struct {
 	// Version is the stamped app version (appid.Version); one that does not match constants.host.version, or none,
 	// is reported as constants.host.devVersion.
 	Version string
+	// OpenRouter keeps the key of the OpenRouter sign-in (ADR 0067); nil: no sign-in offered, xAI only.
+	OpenRouter KeyStore
+	// OpenRouterBaseURL defaults to the contract's OpenRouter base URL.
+	OpenRouterBaseURL string
+	// OpenURL opens the sign-in page in the system browser (Wails app.Browser.OpenURL); nil: the webview gets the URL only.
+	OpenURL func(string) error
 }
 
 // DesktopCapabilities is what this build implements: the agent turn runs in the webview over the provider forward
@@ -80,6 +93,10 @@ func New(o Options) *Server {
 		s.capabilities = *o.Capabilities
 	}
 	s.host = hostOf(o.Constants, o.Version)
+	s.orKeys, s.orBase, s.openURL = o.OpenRouter, strings.TrimRight(strings.TrimSpace(o.OpenRouterBaseURL), "/"), o.OpenURL
+	if s.orKeys != nil && o.Capabilities == nil {
+		s.capabilities.SignIn = []string{"openrouter"}
+	}
 	return s
 }
 
@@ -175,6 +192,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.files(w, r, path, method)
 	case strings.HasPrefix(path, forwardPrefix):
 		s.forward(w, r, path, method)
+	case strings.HasPrefix(path, orForwardPrefix) && s.orKeys != nil:
+		s.orForward(w, r, path, method)
+	case strings.HasPrefix(path, authPrefix):
+		s.authRoute(w, r, path, method)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]string{"code": "not_found", "message": "Unknown runtime path."}})
 	}

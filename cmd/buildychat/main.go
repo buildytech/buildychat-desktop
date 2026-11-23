@@ -54,7 +54,11 @@ func main() {
 		log.Fatal(err)
 	}
 	var app *application.App
-	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app }), Version: appid.Version})
+	rt := runtime.New(runtime.Options{Constants: constants, Keys: secrets.Keys{}, BaseURL: os.Getenv("XAI_BASE_URL"), Saver: newSaver(func() *application.App { return app }), Version: appid.Version,
+		// Sign in with OpenRouter (ADR 0067): the key in its own keychain item (OPENROUTER_API_KEY as the headless fallback),
+		// the sign-in page in the system browser.
+		OpenRouter: secrets.OpenRouter{}, OpenRouterBaseURL: os.Getenv("OPENROUTER_BASE_URL"), OpenURL: openURL(func() *application.App { return app })})
+	defer rt.Close()
 
 	app = application.New(application.Options{
 		Name:        appid.Name,

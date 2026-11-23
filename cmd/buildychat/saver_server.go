@@ -18,3 +18,6 @@ func newSaver(func() *application.App) runtime.Saver {
 	}
 	return nil
 }
+
+// openURL of the headless build: no browser to open; the start answer carries the URL for the caller.
+func openURL(func() *application.App) func(string) error { return nil }

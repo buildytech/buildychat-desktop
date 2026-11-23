@@ -28,3 +28,14 @@ func newSaver(app func() *application.App) runtime.Saver {
 		return runtime.WriteChosen(path, data)
 	})
 }
+
+// openURL opens the OpenRouter sign-in page in the system browser.
+func openURL(app func() *application.App) func(string) error {
+	return func(url string) error {
+		a := app()
+		if a == nil {
+			return runtime.ErrCancelled
+		}
+		return a.Browser.OpenURL(url)
+	}
+}
