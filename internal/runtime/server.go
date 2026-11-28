@@ -58,6 +58,7 @@ type Server struct {
 	orBase       string
 	orModels     modelCache
 	openURL      func(string) error
+	openWindow   PreviewWindow
 	auth         signInState
 	limits       limits
 	settingsFile string
@@ -85,6 +86,8 @@ type Options struct {
 	OpenRouterBaseURL string
 	// OpenURL opens the sign-in page in the system browser (Wails app.Browser.OpenURL); nil: the webview gets the URL only.
 	OpenURL func(string) error
+	// OpenWindow opens the standalone preview window (POST /v1/preview-window); nil (the headless build): the browser opens it.
+	OpenWindow PreviewWindow
 	// SettingsFile keeps the approved-model lists (ADR 0068); default <UserConfigDir>/BuildY/providers.json.
 	SettingsFile string
 	// OpenRouterMedia overrides constants.openrouter.mediaEnabled (the contract runner's env.openrouterMedia).
@@ -114,6 +117,7 @@ func New(o Options) *Server {
 	if _, writable := o.Keys.(KeyStore); writable && o.Capabilities == nil {
 		s.capabilities.Keys = []string{"xai"}
 	}
+	s.openWindow = o.OpenWindow
 	s.settingsFile = o.SettingsFile
 	if s.settingsFile == "" {
 		s.settingsFile = filepath.Join(filepath.Dir(media.DefaultDir()), "providers.json")
@@ -215,6 +219,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.design(w, r, path, method)
 	case path == exportPath:
 		s.export(w, r, method)
+	case path == previewWindowPath:
+		s.previewWindow(w, r, method)
 	case strings.HasPrefix(path, filesPrefix):
 		s.files(w, r, path, method)
 	case strings.HasPrefix(path, forwardPrefix):

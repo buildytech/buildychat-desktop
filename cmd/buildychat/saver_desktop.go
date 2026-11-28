@@ -39,3 +39,28 @@ func openURL(app func() *application.App) func(string) error {
 		return a.Browser.OpenURL(url)
 	}
 }
+
+// openWindow opens the standalone preview in a second app window on the same asset server and webview storage
+// (window.open cannot: a WebView2 popup has no handler for wails.localhost, WebKit gives none). The window is named
+// after the session, so a second request raises it instead of piling up windows.
+func openWindow(app func() *application.App) runtime.PreviewWindow {
+	return func(name, path string) error {
+		a := app()
+		if a == nil {
+			return runtime.ErrCancelled
+		}
+		// Off the request's goroutine: the window is created on the UI thread, which may be the one serving this request.
+		go func() {
+			if w, ok := a.Window.GetByName(name); ok {
+				if w.IsMinimised() {
+					w.UnMinimise()
+				}
+				w.Show()
+				w.Focus()
+				return
+			}
+			a.Window.NewWithOptions(application.WebviewWindowOptions{Name: name, Title: "Preview", Width: 1280, Height: 860, URL: path})
+		}()
+		return nil
+	}
+}

@@ -18,6 +18,9 @@ func TestFilesThenFallback(t *testing.T) {
 	cases := []struct{ path, want, typ string }{
 		{"/", "app", "text/html"},
 		{"/editor/page-1", "app", "text/html"},
+		// the standalone preview of a page (the web app's previewWindowUrl), with its query: the app shell, not a 404
+		{"/home?preview&session=session-b066e122-c354-492d-9464-d3c3cc4b95e1", "app", "text/html"},
+		{"/preview?session=session-b066e122-c354-492d-9464-d3c3cc4b95e1", "app", "text/html"},
 		{"/_app/immutable/a.js", "export const a", "javascript"},
 		{"/render/blocks.mjs", "export const blocks", "javascript"},
 	}
