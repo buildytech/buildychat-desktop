@@ -211,6 +211,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, doc)
 	case method == http.MethodPost && (path == mediaPath || strings.HasPrefix(path, mediaPath+"/")):
 		s.media(w, r)
+	case path == designPath:
+		s.design(w, r, path, method)
 	case path == exportPath:
 		s.export(w, r, method)
 	case strings.HasPrefix(path, filesPrefix):
