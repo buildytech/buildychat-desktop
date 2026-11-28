@@ -95,15 +95,15 @@ func (s *Server) noteProvider(id string, status int, body []byte) {
 // roles answers the roles this host serves with a provider (constants.providers.roleSupport; OpenRouter pictures only
 // while switched on).
 func (s *Server) roles(id string) []string {
+	// Emit roles in constants.providers.roles order so Settings rows stay stable when media is switched on.
+	support := s.constants.Providers.RoleSupport[id]
 	out := []string{}
-	for _, role := range s.constants.Providers.RoleSupport[id] {
-		if role == "media" && id == "openrouter" && !s.orPictures {
+	for _, role := range s.constants.Providers.Roles {
+		allowed := contains(support, role) || (role == "media" && id == "openrouter" && s.orPictures)
+		if !allowed || (role == "media" && id == "openrouter" && !s.orPictures) {
 			continue
 		}
 		out = append(out, role)
-	}
-	if id == "openrouter" && s.orPictures && !contains(out, "media") {
-		out = append(out, "media")
 	}
 	return out
 }

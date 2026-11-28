@@ -15,6 +15,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,4 +197,31 @@ func (s *Server) orGenerate(ctx context.Context, key, prompt, aspect string, n i
 		cost = int64(math.Round(c * s.constants.OpenRouter.USDTicks))
 	}
 	return obj{"ok": true, "status": "done", "requestId": "or-" + randomHex(8), "urls": urls, "costUsdTicks": cost}, nil
+}
+
+// orRoute is how an app model id is sent on the OpenRouter wire (buildytech/chat, packages/agent-manifests/src/openrouter.ts).
+// The app keeps xAI ids everywhere; the transport sends x-ai/… and grok-4.20's reasoning switch.
+type orRoute struct {
+	id        string
+	reasoning *bool // nil: omit (grok-4.7); set: grok-4.20
+}
+
+func openRouterRoute(appID string) (orRoute, bool) {
+	switch strings.TrimSpace(appID) {
+	case "grok-4.20-0309-non-reasoning":
+		off := false
+		return orRoute{id: "x-ai/grok-4.20", reasoning: &off}, true
+	case "grok-4.20-0309-reasoning":
+		on := true
+		return orRoute{id: "x-ai/grok-4.20", reasoning: &on}, true
+	case "grok-4.7":
+		return orRoute{id: "x-ai/grok-4.7"}, true
+	case "x-ai/grok-4.20":
+		off := false
+		return orRoute{id: "x-ai/grok-4.20", reasoning: &off}, true
+	case "x-ai/grok-4.7":
+		return orRoute{id: "x-ai/grok-4.7"}, true
+	default:
+		return orRoute{}, false
+	}
 }

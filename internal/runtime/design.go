@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -143,23 +145,52 @@ func (s *Server) design(w http.ResponseWriter, r *http.Request, path, method str
 		designFail(w, http.StatusUnprocessableEntity, "missing_model_id", "Select a Grok chat model before sending.")
 		return
 	}
-	// The provider the app runs on: OpenRouter when signed in, else xAI (the status' top-level provider).
+	// The Design role's provider (ADR 0071): the app sends "xai" or "openrouter". Omitted keeps the v0.1.0 default
+	// (OpenRouter when signed in, else xAI). The app's model ids are mapped on the OpenRouter wire.
+	provider, _ := rec["provider"].(string)
+	provider = strings.TrimSpace(provider)
+	if provider != "" && provider != "xai" && provider != "openrouter" {
+		designFail(w, http.StatusUnprocessableEntity, "invalid_request", "provider is xai or openrouter.")
+		return
+	}
 	xaiKey := ""
 	if s.keys != nil {
 		xaiKey, _ = s.keys.Key()
 	}
 	orKey := s.orKey()
+	if provider == "" {
+		if orKey != "" {
+			provider = "openrouter"
+		} else {
+			provider = "xai"
+		}
+	}
 	t := target{id: "xai", name: "xAI", url: s.baseURL() + "/chat/completions", key: xaiKey}
-	tokenParam := "max_completion_tokens"
-	if orKey != "" {
+	if provider == "openrouter" {
 		t = target{id: "openrouter", name: "OpenRouter", url: s.orBaseURL() + "/chat/completions", key: orKey, extra: openRouterAttribution}
-		tokenParam = "max_tokens"
 	}
 	if t.key == "" {
-		designFail(w, http.StatusServiceUnavailable, "xai_api_key_missing", "No xAI key is stored on this computer. No provider call was made.")
+		code, name := "xai_api_key_missing", "xAI"
+		if t.id == "openrouter" {
+			code, name = "openrouter_key_missing", "OpenRouter"
+		}
+		designFail(w, http.StatusServiceUnavailable, code, "No "+name+" key is stored on this computer. No provider call was made.")
 		return
 	}
-	if list, narrowed := s.approvedList(t.id, "chat"); narrowed && !contains(list, modelID) {
+	sendID := strings.TrimSpace(modelID)
+	var reasoning any
+	if t.id == "openrouter" {
+		route, ok := openRouterRoute(modelID)
+		if !ok {
+			designFail(w, http.StatusUnprocessableEntity, "model_not_listed", "This key does not list that chat model. No chat request was sent.")
+			return
+		}
+		sendID = route.id
+		if route.reasoning != nil {
+			reasoning = map[string]any{"enabled": *route.reasoning}
+		}
+	}
+	if list, narrowed := s.approvedList(t.id, "chat"); narrowed && !contains(list, modelID) && !contains(list, sendID) {
 		designFail(w, http.StatusForbidden, "model_not_approved", "That chat model is not approved in Settings. No chat request was sent.")
 		return
 	}
@@ -174,13 +205,15 @@ func (s *Server) design(w http.ResponseWriter, r *http.Request, path, method str
 		designFail(w, http.StatusServiceUnavailable, code, "The models of this key could not be listed. No chat request was sent.")
 		return
 	}
-	if !contains(ids, modelID) {
+	if !contains(ids, sendID) {
 		designFail(w, http.StatusUnprocessableEntity, "model_not_listed", "This key does not list that chat model. No chat request was sent.")
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"model": modelID, "messages": messages, "stream": false, tokenParam: maxDesignTokens, "temperature": 0,
-	})
+	bodyOut := map[string]any{"model": sendID, "messages": messages, "stream": false, "max_completion_tokens": maxDesignTokens, "temperature": 0}
+	if reasoning != nil {
+		bodyOut["reasoning"] = reasoning
+	}
+	payload, _ := json.Marshal(bodyOut)
 	started := time.Now()
 	logDesign := func(ok bool, code string, status int) {
 		log.Printf(`{"runtime":"xai-grok","event":"design","provider":%q,"ok":%t,"code":%q,"status":%d,"ms":%d}`, t.name, ok, code, status, time.Since(started).Milliseconds())
@@ -232,5 +265,43 @@ func (s *Server) design(w http.ResponseWriter, r *http.Request, path, method str
 	}
 	text = strings.ReplaceAll(text, t.key, "[redacted]")
 	logDesign(true, "ok", res.StatusCode)
-	designJSON(w, http.StatusOK, map[string]any{"ok": true, "text": text})
+	out := map[string]any{"ok": true, "text": text}
+	if ticks := designTicks(doc, s.constants.OpenRouter.USDTicks); ticks != nil {
+		out["costUsdTicks"] = ticks
+	}
+	designJSON(w, http.StatusOK, out)
+}
+
+// designTicks reads a billed amount: xAI usage.cost_in_usd_ticks, or OpenRouter usage.cost in USD converted with
+// constants.openrouter.usdTicks. Missing cost is omitted, never zero.
+func designTicks(payload any, usdTicks float64) any {
+	rec, ok := payload.(map[string]any)
+	if !ok {
+		return nil
+	}
+	usage, ok := rec["usage"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch v := usage["cost_in_usd_ticks"].(type) {
+	case float64:
+		if v >= 0 && v == math.Trunc(v) {
+			return int64(v)
+		}
+	case json.Number:
+		if n, err := v.Int64(); err == nil && n >= 0 {
+			return n
+		}
+	case string:
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			return n
+		}
+	}
+	if usd, ok := usage["cost"].(float64); ok && usd >= 0 && usdTicks > 0 {
+		n := math.Round(usd * usdTicks)
+		if n >= 0 && n == math.Trunc(n) {
+			return int64(n)
+		}
+	}
+	return nil
 }
