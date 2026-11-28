@@ -18,8 +18,7 @@ jobs:
       # The WebP encoder is gen2brain/webp's embedded libwebp, never a system one (scripts/gate.sh).
       TAGS: nodynamic
       # The app version: scripts/package.sh and the desktop build stamp it (internal/appid.Version, status host.version).
-      # A v* tag stamps its own version (v0.1.0 -> 0.1.0); every other run is 0.1.0.
-      BUILDYCHAT_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && substr(github.ref_name, 1, 40) || '0.1.0' }}
+      BUILDYCHAT_VERSION: 0.1.0
     defaults:
       run:
         shell: bash
@@ -27,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      # A v* tag stamps its own version (v0.1.0 -> 0.1.0); every other run keeps the default above.
+      - name: Version of a tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "BUILDYCHAT_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
